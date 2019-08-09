@@ -22,8 +22,8 @@ class TestForward(unittest.TestCase):
         self.assertEqual(convert_to_org(["Take dog for a walk @home @park @mrwiggles"]), "* Tasks\n** TODO Take dog for a walk :home:park:mrwiggles:")
 
     def test_Dates(self):
-        self.assertEqual(convert_to_org(["2018-12-10 Take dog for a walk"]), "* Tasks\n** TODO Take dog for a walk\nCREATED: [2018-12-10]")
-        self.assertEqual(convert_to_org(["2018-12-12 2018-12-10 Take dog for a walk"]), "* Tasks\n** TODO Take dog for a walk\nCLOSED: [2018-12-12]\nCREATED: [2018-12-10]")
+        self.assertEqual(convert_to_org(["2018-12-10 Take dog for a walk"]), "* Tasks\n** TODO Take dog for a walk\n[2018-12-10]")
+        self.assertEqual(convert_to_org(["2018-12-12 2018-12-10 Take dog for a walk"]), "* Tasks\n** TODO Take dog for a walk\nCLOSED: [2018-12-12]\n[2018-12-10]")
         self.assertEqual(convert_to_org(["Take dog for a walk due:2018-12-12"]), "* Tasks\n** TODO Take dog for a walk\nDEADLINE: <2018-12-12>")
 
 class TestReverse(unittest.TestCase):
@@ -50,6 +50,7 @@ class TestReverse(unittest.TestCase):
     def test_Dates(self):
         self.assertEqual(convert_to_todo(convert_to_org(["2018-12-10 Take dog for a walk"]).split('\n')),
                          "2018-12-10 Take dog for a walk")
+        print(convert_to_org(["2018-12-10 Take dog for a walk"]))
         self.assertEqual(convert_to_todo(convert_to_org(["2018-12-12 2018-12-10 Take dog for a walk"]).split('\n')),
                          "2018-12-12 2018-12-10 Take dog for a walk")
         self.assertEqual(convert_to_todo(convert_to_org(["Take dog for a walk due:2018-12-12"]).split('\n')),

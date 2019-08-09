@@ -59,13 +59,18 @@ def remove_tags(text, project_regex, context_regex, key_value_regex):
 def process_notes(key_values, completion_date, creation_date):
     """ Convert completion, creation and deadline dates to Org mode format """
     components = []
+    properties = []
     if completion_date:
         components.append(f'CLOSED: [{date_to_string(completion_date)}]')
     if creation_date:
-        components.append(f'CREATED: [{date_to_string(creation_date)}]')
+        components.append(f'[{date_to_string(creation_date)}]')
     for key, value in key_values.items():
         if key == 'due':
             components.append(f'DEADLINE: <{date_to_string(parse_date(value))}>')
+        else:
+            properties.append(f':{key.upper()}: value')
+    if len(properties) > 0:
+        components.extend([':PROPERTIES:']+properties+[':END:'])
     return '\n'.join(list(filter(None, components)))
 
 
@@ -148,6 +153,7 @@ def convert_to_todo(lines):
     creation_date_regex = re.compile(r'CREATED:\s+[<\[]([0-9]+-[0-9]+-[0-9]+)')
     completion_date_regex = re.compile(r'CLOSED:\s+[<\[]([0-9]+-[0-9]+-[0-9]+)')
     deadline_date_regex = re.compile(r'DEADLINE:\s+[<\[]([0-9]+-[0-9]+-[0-9]+)')
+    date_regex = re.compile(r'^\s*[<\[]([0-9]+-[0-9]+-[0-9]+)')
     key_value_regex = re.compile(r'^\s*:(.*?):\s*(.*?)\s*$')
 
     def cut_priority(regex, heading):
@@ -261,6 +267,9 @@ def convert_to_todo(lines):
             deadline_date = parse_date_with_regex(deadline_date_regex, line)
             if deadline_date:
                 todo['key_values']['due'] = deadline_date
+            date = parse_date_with_regex(date_regex, line)
+            if date:
+                todo['creation_date'] = date
             key, value = parse_key_value(key_value_regex, line)
             if key:
                 todo['key_values'][key] = value
