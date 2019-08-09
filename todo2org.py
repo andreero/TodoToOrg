@@ -10,6 +10,7 @@ Returns:
 import re
 import os
 import argparse
+import copy
 from datetime import datetime
 from collections import defaultdict
 
@@ -61,7 +62,7 @@ def process_notes(key_values, completion_date, creation_date):
     if completion_date:
         components.append(f'CLOSED: [{date_to_string(completion_date)}]')
     if creation_date:
-        components.append(f'[{date_to_string(creation_date)}]')
+        components.append(f'CREATED: [{date_to_string(creation_date)}]')
     for key, value in key_values.items():
         if key == 'due':
             components.append(f'DEADLINE: <{date_to_string(parse_date(value))}>')
@@ -137,17 +138,161 @@ def convert_to_org(lines):
     return '\n'.join(output_lines)
 
 
+def convert_to_todo(lines):
+    """ Convert list of todo Org mode lines to todo.txt formatted string"""
+
+    header_regex = re.compile(r'^(\*+)\s(.*?)\s*$')
+    todo_status_regex = re.compile(r'\s*(TODO|DONE)\s(.*?)\s*$')
+    priority_regex = re.compile(r'^\[#([A-Z])\]\s(.*?)\s*$')
+    tags_regex = re.compile(r'(.*?)\s*:(.*?):(.*?)$')
+    creation_date_regex = re.compile(r'CREATED:\s+[<\[]([0-9]+-[0-9]+-[0-9]+)')
+    completion_date_regex = re.compile(r'CLOSED:\s+[<\[]([0-9]+-[0-9]+-[0-9]+)')
+    deadline_date_regex = re.compile(r'DEADLINE:\s+[<\[]([0-9]+-[0-9]+-[0-9]+)')
+    key_value_regex = re.compile(r'^\s*:(.*?):\s*(.*?)\s*$')
+
+    def cut_priority(regex, heading):
+        priority = ''
+        priority_match = re.search(regex, heading)
+        if priority_match:
+            priority = priority_match.group(1)
+            heading = priority_match.group(2)
+        return priority, heading
+
+    def parse_date_with_regex(regex, line):
+        date = ''
+        match = re.search(regex, line)
+        if match:
+            date = date_to_string(parse_date(match.group(1)))
+        return date
+
+    def cut_tags(tags_regex, heading):
+        tag_list = []
+        tags_match = re.search(tags_regex, heading)
+
+        if tags_match:
+            heading = tags_match.group(1)
+            first_tag = tags_match.group(2)
+            tag_list.append(first_tag)
+            rest_of_tags = tags_match.group(3)
+            if rest_of_tags:
+                for tag in rest_of_tags.split(':'):
+                    if tag != '':
+                        tag_list.append(tag)
+        return tag_list, heading
+
+    def parse_key_value(key_value_regex, line):
+        property_match = re.search(key_value_regex, line)
+        if property_match:
+            return property_match.group(1), property_match.group(2)
+        else:
+            return '', ''
+
+    def todo_to_string(todo):
+        completed = 'x' if todo['todo_status'] == 'DONE' else ''
+        priority = f'({todo["priority"]})' if todo["priority"] else ''
+        projects = ' '.join([f'+{project}' for project in list(filter(lambda x: x not in ['', 'Tasks'], todo['projects']))])
+        contexts = ''
+        for _list in todo['tags']:
+            contexts += ''.join(list(filter(None, [f'@{item} ' for item in _list])))
+        key_values = ' '.join([f'{key}:{value}' for key, value in todo['key_values'].items()])
+        return ' '.join(list(filter(None, [completed, priority, todo['completion_date'], todo['creation_date'],
+                                           todo['body_text'], projects.strip(), contexts.strip(), key_values])))
+
+    todos = list()
+    todo = {'todo_status': '',
+            'priority': '',
+            'completion_date': '',
+            'creation_date': '',
+            'body_text': '',
+            'projects': [],
+            'tags': [],
+            'key_values': {}}
+    projects = []
+    tags = []
+    level = 1
+
+    for line in lines:
+        line_is_header = re.search(header_regex, line)
+
+        if line_is_header:
+            level = len(line_is_header.group(1))  # number of stars
+            heading = line_is_header.group(2)  # header text
+            todo_match = re.match(todo_status_regex, heading)
+
+            if todo_match:
+                heading = todo_match.group(2)
+
+                if heading:  # heading or todo line
+                    if todo['body_text']:
+                        # save previous todo string
+                        todos.append(copy.deepcopy(todo))
+                        todo['projects'] = copy.deepcopy(projects)
+                        todo['tags'] = copy.deepcopy(tags)
+                        todo['completion_date'] = ''
+                        todo['creation_date'] = ''
+                        todo['key_values'] = dict()
+
+                    todo['todo_status'] = todo_match.group(1)
+                    todo['priority'], heading = cut_priority(priority_regex, heading)
+                    new_tags, heading = cut_tags(tags_regex, heading)
+                    if new_tags:
+                        todo['tags'].append(new_tags)
+                    todo['body_text'] = heading
+
+            else:
+                new_tags, heading = cut_tags(tags_regex, heading)
+                tags = tags[:level-1]
+                tags.append(new_tags)
+                projects = projects[:level-1]
+                projects.append(heading)
+                if not todos:
+                    todo['projects'] = copy.deepcopy(projects)
+                    todo['tags'] = copy.deepcopy(tags)
+
+        else:  # non-heading line
+            if ':PROPERTIES:' in line or ':END:' in line:
+                continue
+            date = parse_date_with_regex(creation_date_regex, line)
+            if date:
+                todo['creation_date'] = date
+            date = parse_date_with_regex(completion_date_regex, line)
+            if date:
+                todo['completion_date'] = date
+            deadline_date = parse_date_with_regex(deadline_date_regex, line)
+            if deadline_date:
+                todo['key_values']['due'] = deadline_date
+            key, value = parse_key_value(key_value_regex, line)
+            if key:
+                todo['key_values'][key] = value
+
+    todos.append(copy.deepcopy(todo))
+    output_lines = []
+    for todo in todos:
+        output_lines.append(todo_to_string(todo))
+    return '\n'.join(output_lines)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Todo.txt to Org mode converter',
-        usage="todo2org.py file1.txt file2.txt ..")
-    parser.add_argument('input_files', type=argparse.FileType('r', encoding='utf-8'), nargs='+', help='list of input files')
+        usage="todo2org.py [-r] file1 file2 ..")
+    parser.add_argument('input_files', type=argparse.FileType('r', encoding='utf-8'),
+                        nargs='+', help='list of input files')
+    parser.add_argument('-r', '--reverse', dest='reverse', default=False, action='store_true',
+                        help='convert to todo.txt instead')
     options = parser.parse_args()
+
+    if options.reverse:
+        new_extension = '_.txt'
+        convert = convert_to_todo
+    else:
+        new_extension = '.org'
+        convert = convert_to_org
 
     for input_file in options.input_files:
         file_name, extension = os.path.splitext(input_file.name)
-        with input_file, open(file_name+'.org', 'w', newline='\n', encoding='utf-8') as output_file:
-            converted_lines = convert_to_org(input_file.readlines())
+        with input_file, open(file_name+new_extension, 'w', newline='\n', encoding='utf-8') as output_file:
+            converted_lines = convert(input_file.readlines())
             output_file.writelines(converted_lines)
 
 
